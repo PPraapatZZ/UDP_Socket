@@ -4,12 +4,14 @@ import struct
 import sys
 import time
 import hashlib
+import shutil
 
 # Constants
 BUFFER_SIZE = 4096
 MAX_PACKET_HISTORY = 1000  # Track this many most recent packets to handle duplicates
 SERVER_TIMEOUT = 120  # Increased timeout for Clumsy testing (especially Case 6)
 MAX_REASONABLE_PACKETS = 100000  # Safety limit to prevent invalid packet counts
+CREATE_BACKUP = False  # Set to True if you want to create backups before replacing files
 
 def receive_file(server_ip, server_port):
     start_time = time.time()
@@ -238,6 +240,8 @@ def receive_file(server_ip, server_port):
     print(f"Received {received_size} bytes in {duration:.2f} seconds")
     print(f"Effective transfer rate: {(received_size / 1024 / 1024) / duration:.2f} MB/s")
     
+    verification_success = False
+    
     # Verify with MD5 if available
     if file_md5:
         print("Verifying file integrity with MD5...")
@@ -251,20 +255,41 @@ def receive_file(server_ip, server_port):
         
         if received_md5 == file_md5:
             print("MD5 verification: SUCCESS")
-            return True
+            verification_success = True
+            
+            # Replace test_file.bin with the received file if MD5 verified
+            try:
+                # Create backup if enabled
+                if CREATE_BACKUP and os.path.exists(file_name):
+                    backup_filename = f"{file_name}.bak"
+                    shutil.copy2(file_name, backup_filename)
+                    print(f"Created backup of original file as {backup_filename}")
+                
+                # Replace the original test_file.bin with the received file
+                shutil.copy2(output_file, file_name)
+                print(f"Successfully replaced {file_name} with verified received file")
+                
+                # Remove the temporary received file
+                os.remove(output_file)
+                print(f"Removed temporary file {output_file}")
+                
+            except Exception as e:
+                print(f"Error during file replacement: {e}")
         else:
             print(f"MD5 verification: FAILED")
             print(f"Expected: {file_md5}")
             print(f"Received: {received_md5}")
-            return False
-    
-    # Fallback to size verification if no MD5
-    if received_size == file_size:
-        print("Size verification: SUCCESS")
-        return True
+            verification_success = False
     else:
-        print(f"Size verification: FAILED (expected {file_size}, got {received_size})")
-        return False
+        # Fallback to size verification if no MD5
+        if received_size == file_size:
+            print("Size verification: SUCCESS")
+            verification_success = True
+        else:
+            print(f"Size verification: FAILED (expected {file_size}, got {received_size})")
+            verification_success = False
+    
+    return verification_success
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
